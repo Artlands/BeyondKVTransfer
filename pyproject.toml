@@ -31,7 +31,7 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["bkvt*"]
+include = ["bkvt*", "analysis*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -40,5 +40,5 @@ log_cli = true
 log_cli_level = "INFO"
 
 [tool.coverage.run]
-source = ["bkvt"]
-omit = ["tests/*", "scripts/*", "analysis/*"]
+source = ["bkvt", "analysis"]
+omit = ["tests/*", "scripts/*", "analysis/notebooks/*"]
