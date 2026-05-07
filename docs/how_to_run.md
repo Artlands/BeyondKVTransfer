@@ -1,8 +1,9 @@
 # How To Reproduce A Trace
 
-This guide covers the current vLLM path.  SGLang scheduler/radix and long
-HiCache/disaggregation integration are tracked separately, so do not use this
-as proof that M5 is complete.
+This guide covers the current vLLM path and the import-time entrypoint used by
+the SGLang probes.  SGLang HiCache and PD-disaggregation wrappers are included,
+but final M5 acceptance still requires a real PD-disagg smoke run on a matching
+SGLang installation.
 
 ## Install
 
@@ -33,6 +34,21 @@ For connector experiments, also configure the vLLM KV connector backend as
 usual.  BKVT wraps connector instances through the vLLM patch layer and emits
 `transfer.start`, `transfer.end`, and connector metadata records when the
 backend exposes the relevant calls.
+
+## Run SGLang With Tracing
+
+Apply the SGLang patch before constructing the scheduler or cache controller:
+
+```bash
+BKVT_ENABLE=1 \
+BKVT_OUTPUT_DIR=./bkvt_traces \
+python -c "from bkvt.integrations.sglang.patch import apply; apply(); import sglang"
+```
+
+In a real launch, place the `apply()` call in the process entrypoint before
+SGLang imports and initializes worker objects.  The patch layer enables
+scheduler/radix/allocator probes, HiCache L1/L2/L3 tier movement probes, and
+PD-disaggregation send/recv backend wrappers when those SGLang modules exist.
 
 Useful environment variables:
 

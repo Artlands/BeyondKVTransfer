@@ -33,6 +33,8 @@ Implemented:
 - Trace validator: `scripts/validate_traces.py`.
 - vLLM integration modules for scheduler, block pool, runner, and connector
   wrapping.
+- SGLang scheduler/radix/allocator probes plus HiCache and PD-disaggregation
+  transfer wrappers.
 - System counter collectors and clock anchor support.
 - Analysis loader/index utilities and Q1-Q6 helper libraries.
 - Overhead validation scaffolding under `tests/overhead/`.
@@ -40,8 +42,8 @@ Implemented:
 
 Deferred:
 
-- Long SGLang HiCache and disaggregation integration.  The package namespace
-  exists, but this work should be treated as planned rather than complete.
+- Native NCCL profiler plugin and hardware-backed long-run acceptance on a
+  multi-node SGLang deployment.
 
 ## Installation
 

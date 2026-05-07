@@ -40,6 +40,8 @@ def bkvt_env(tmp_path, monkeypatch):
     import bkvt.config as _cfg_mod
     import bkvt.emitter as _em_mod
     import bkvt.integrations.sglang.patch as patch
+    import bkvt.integrations.sglang.disagg_probe as dp
+    import bkvt.integrations.sglang.hicache_probe as hp
     import bkvt.integrations.sglang.scheduler_probe as sp
 
     _cfg_mod.reset_config()
@@ -47,6 +49,8 @@ def bkvt_env(tmp_path, monkeypatch):
     _em_mod._emitter = None
     patch.reset()
     sp._tracker = sp.RequestStateTracker()
+    hp._PATCHES_APPLIED = False
+    dp._PATCHES_APPLIED = False
 
     yield _em_mod.get_emitter()
 
@@ -173,3 +177,97 @@ def test_radix_allocator_records_make_q4_inputs(bkvt_env):
     assert len([r for r in records if r.get("type") == "kv_block" and r.get("subtype") == "hash_insert"]) == 2
     assert len([r for r in records if r.get("type") == "kv_block" and r.get("subtype") == "allocate"]) == 3
     assert len([r for r in records if r.get("type") == "kv_block" and r.get("subtype") == "free"]) == 2
+
+
+def test_hicache_probe_emits_transfer_pairs_and_tier_transitions(bkvt_env):
+    from bkvt.integrations.sglang.hicache_probe import make_hicache_transfer_wrapper
+
+    controller = _ns()
+
+    def load_orig(self, blocks, request=None, bytes=None):
+        return blocks
+
+    load = make_hicache_transfer_wrapper(load_orig, "load_to_device")
+    req = make_req("sg-hicache-1")
+    load(controller, [30, 31], request=req, bytes=8192)
+
+    def backup_orig(self, blocks, request_id=None, bytes=None):
+        return blocks
+
+    backup = make_hicache_transfer_wrapper(backup_orig, "backup_to_storage")
+    backup(controller, [32], request_id="sg-hicache-1", bytes=4096)
+
+    records = _flush_and_collect(bkvt_env)
+    transfers = [r for r in records if r.get("type") == "transfer"]
+    starts = [r for r in transfers if r.get("subtype") == "start"]
+    ends = [r for r in transfers if r.get("subtype") == "end"]
+    assert len(starts) == 2
+    assert {r["transfer_id"] for r in starts} == {r["transfer_id"] for r in ends}
+    assert {r["direction"] for r in starts} == {"load", "save"}
+
+    tier_events = [r for r in records if r.get("type") == "kv_block"]
+    assert any(
+        r.get("subtype") == "tier_promote"
+        and r.get("tier_before") == "DRAM_LOCAL"
+        and r.get("tier_after") == "HBM_LOCAL"
+        and r.get("block_id") == 30
+        for r in tier_events
+    )
+    assert any(
+        r.get("subtype") == "tier_demote"
+        and r.get("tier_before") == "DRAM_LOCAL"
+        and r.get("tier_after") == "OBJECT_STORE"
+        and r.get("block_id") == 32
+        for r in tier_events
+    )
+    metadata_subtypes = {r.get("subtype") for r in records if r.get("type") == "metadata"}
+    assert "hicache_promote" in metadata_subtypes
+    assert "hicache_demote" in metadata_subtypes
+
+
+def test_disagg_probe_emits_paired_pd_transfer_records(bkvt_env):
+    from bkvt.integrations.sglang.disagg_probe import make_disagg_transfer_wrapper
+
+    def send_orig(request, block_ids, bytes=None):
+        return _ns()
+
+    send = make_disagg_transfer_wrapper(
+        send_orig,
+        "send_kv",
+        module_name="sglang.srt.disaggregation.prefill",
+        role_hint="prefill",
+    )
+    req = make_req("sg-pd-1")
+    send(req, [40, 41], bytes=16384)
+
+    def recv_orig(request_id=None, block_ids=None, bytes=None):
+        out = _ns()
+        out.descriptors = [1, 2]
+        return out
+
+    recv = make_disagg_transfer_wrapper(
+        recv_orig,
+        "recv_kv",
+        module_name="sglang.srt.disaggregation.nixl.conn",
+        role_hint="decode",
+    )
+    recv(request_id="sg-pd-1", block_ids=[40, 41], bytes=16384)
+
+    records = _flush_and_collect(bkvt_env)
+    transfers = [r for r in records if r.get("type") == "transfer"]
+    starts = [r for r in transfers if r.get("subtype") == "start"]
+    ends = [r for r in transfers if r.get("subtype") == "end"]
+    assert len(starts) == 2
+    assert {r["transfer_id"] for r in starts} == {r["transfer_id"] for r in ends}
+    assert any(r.get("direction") == "save" and r.get("issued_at_phase") == "prefill" for r in starts)
+    assert any(
+        r.get("direction") == "load"
+        and r.get("transport") == "nixl"
+        and r.get("issued_at_phase") == "decode"
+        for r in starts
+    )
+    assert any(r.get("wr_count") == 2 for r in ends)
+    assert any(
+        r.get("type") == "metadata" and r.get("subtype") == "nixl_call"
+        for r in records
+    )

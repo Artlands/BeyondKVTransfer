@@ -1,5 +1,5 @@
 """
-SGLang monkey-patch entrypoint for BeyondKVTransfer -- Milestone 4.
+SGLang monkey-patch entrypoint for BeyondKVTransfer -- Milestones 4 and 5.
 
 Usage:
 
@@ -24,7 +24,7 @@ _apply_result: Optional[dict] = None
 
 
 def apply(config: Any = None) -> dict:
-    """Apply all M4 SGLang probes."""
+    """Apply all SGLang probes."""
     global _apply_result
 
     with _apply_lock:
@@ -36,23 +36,37 @@ def apply(config: Any = None) -> dict:
             _apply_result = {
                 "applied": False,
                 "reason": "BKVT_ENABLE=0",
-                "modules": {"scheduler": False, "radix": False},
+                "modules": {
+                    "scheduler": False,
+                    "radix": False,
+                    "hicache": False,
+                    "disagg": False,
+                },
             }
             return _apply_result
 
         _emitter_mod._get_or_create_emitter(cfg)
 
-        from bkvt.integrations.sglang import radix_probe, scheduler_probe
+        from bkvt.integrations.sglang import (
+            disagg_probe,
+            hicache_probe,
+            radix_probe,
+            scheduler_probe,
+        )
 
         scheduler_ok = scheduler_probe.apply_patches()
         radix_ok = radix_probe.apply_patches()
-        any_ok = scheduler_ok or radix_ok
+        hicache_ok = hicache_probe.apply_patches()
+        disagg_ok = disagg_probe.apply_patches()
+        any_ok = scheduler_ok or radix_ok or hicache_ok or disagg_ok
 
         if any_ok:
             logger.info(
-                "bkvt[sglang]: patches active -- scheduler=%s radix=%s",
+                "bkvt[sglang]: patches active -- scheduler=%s radix=%s hicache=%s disagg=%s",
                 scheduler_ok,
                 radix_ok,
+                hicache_ok,
+                disagg_ok,
             )
         else:
             logger.warning(
@@ -63,7 +77,12 @@ def apply(config: Any = None) -> dict:
         _apply_result = {
             "applied": any_ok,
             "reason": "ok" if any_ok else "no_probe_sites_found",
-            "modules": {"scheduler": scheduler_ok, "radix": radix_ok},
+            "modules": {
+                "scheduler": scheduler_ok,
+                "radix": radix_ok,
+                "hicache": hicache_ok,
+                "disagg": disagg_ok,
+            },
         }
         return _apply_result
 
@@ -78,6 +97,8 @@ def reset() -> None:
     for mod_name in (
         "bkvt.integrations.sglang.scheduler_probe",
         "bkvt.integrations.sglang.radix_probe",
+        "bkvt.integrations.sglang.hicache_probe",
+        "bkvt.integrations.sglang.disagg_probe",
     ):
         try:
             mod = importlib.import_module(mod_name)

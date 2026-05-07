@@ -65,14 +65,17 @@ should pass through unchanged.
 
 ## SGLang Backends
 
-The long SGLang HiCache and disaggregation work is intentionally deferred.
-When implementing it, mirror the vLLM wrapper strategy:
+Use `bkvt.integrations.sglang.hicache_probe` for HiCache controller movement
+methods and `bkvt.integrations.sglang.disagg_probe` for PD-disaggregation
+backends.  Both modules patch known method names only when the corresponding
+SGLang modules exist, so add new backend verbs there instead of creating a
+parallel patch entrypoint.
 
 Use scheduler/radix/allocator probes for request, prefix, and allocation state.
-Use HiCache controller probes for L1/L2/L3 tier transitions.
-Use PD disaggregation backend probes for prefill-to-decode transfers.
-Use Mooncake/NIXL wrappers only for backend-specific bytes and completion
-timestamps.
+Use HiCache controller probes for L1/L2/L3 tier transitions.  Use PD
+disaggregation backend probes for prefill-to-decode transfers.  Add
+Mooncake/NIXL-specific extraction only when the backend exposes extra bytes,
+descriptor counts, or completion timestamps.
 
 ## Validation
 
