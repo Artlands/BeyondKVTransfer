@@ -1,31 +1,30 @@
 """
-vLLM connector factory stub for BeyondKVTransfer — M3 compatibility shim.
+vLLM connector factory for BeyondKVTransfer — Milestone 3.
 
 This module provides the ``tracing_factory`` entry point that is activated by::
 
     VLLM_KV_CONNECTOR_FACTORY=bkvt.integrations.vllm.factory.tracing_factory
 
-When set, vLLM will call ``tracing_factory(inner_connector)`` instead of
-directly using the inner connector.  In M2 this factory is a no-op pass-through
-that also applies the M2 patches (so the env var alone can activate all probes).
+When set, vLLM calls this entry point instead of directly creating the
+configured connector.  We apply the M2 probes, delegate to vLLM's native
+factory, then wrap the resulting connector with ``TracingConnectorWrapper``.
 
-In M3, this factory will be replaced by the full ``TracingConnectorWrapper``
-(§5.4) which wraps ``KVConnectorBase_V1`` methods.
-
-Usage (M2)
-----------
-Either call ``bkvt.integrations.vllm.patch.apply()`` explicitly, or set::
-
-    BKVT_ENABLE=1
-    VLLM_KV_CONNECTOR_FACTORY=bkvt.integrations.vllm.factory.tracing_factory
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Optional
 
+from bkvt.integrations.vllm.connector_wrapper import (
+    TracingConnectorWrapper,
+    wrap_connector,
+)
+
 logger = logging.getLogger(__name__)
+
+_IN_TRACING_FACTORY = False
 
 
 # ---------------------------------------------------------------------------
@@ -33,15 +32,14 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def tracing_factory(config: Any, *args: Any, **kwargs: Any) -> Any:
-    """Connector factory that activates M2 probes and returns the inner connector.
+    """Create the configured vLLM connector and wrap it for tracing.
 
-    vLLM will call this as if it were a ``KVConnectorFactory.create_connector_v1``
-    replacement.  We first ensure M2 patches are applied, then delegate to the
-    real factory.
-
-    In M3 this function will be replaced by one that wraps the inner connector
-    with ``TracingConnectorWrapper``.
+    The exact vLLM factory signature has changed across releases, so this
+    function preserves ``*args``/``**kwargs`` and only assumes the first
+    argument is the connector configuration.
     """
+    global _IN_TRACING_FACTORY
+
     from bkvt.integrations.vllm.patch import apply as _apply
     result = _apply()
     if not result.get("applied"):
@@ -50,38 +48,45 @@ def tracing_factory(config: Any, *args: Any, **kwargs: Any) -> Any:
             result.get("reason"),
         )
 
+    if isinstance(config, TracingConnectorWrapper):
+        return config
+
+    if _IN_TRACING_FACTORY:
+        _original = _original_factory()
+        if _original is None:
+            return None
+        return _original(config, *args, **kwargs)
+
     # Delegate to vLLM's own factory so the inner connector is created normally.
+    # Some vLLM builds consult VLLM_KV_CONNECTOR_FACTORY inside the factory; we
+    # temporarily remove this env var to avoid recursively calling ourselves.
     try:
-        from vllm.distributed.kv_transfer.kv_connector.factory import (  # type: ignore
-            KVConnectorFactory,
-        )
-        return KVConnectorFactory.create_connector_v1(config, *args, **kwargs)
+        _original = _original_factory()
+        if _original is None:
+            return None
+
+        old_env = os.environ.pop("VLLM_KV_CONNECTOR_FACTORY", None)
+        _IN_TRACING_FACTORY = True
+        try:
+            connector = _original(config, *args, **kwargs)
+        finally:
+            _IN_TRACING_FACTORY = False
+            if old_env is not None:
+                os.environ["VLLM_KV_CONNECTOR_FACTORY"] = old_env
+
+        return wrap_connector(connector)
     except Exception as exc:
         logger.warning(
             "bkvt[vllm]: could not delegate to KVConnectorFactory: %s", exc
         )
         return None
-
-
-# ---------------------------------------------------------------------------
-# M3 placeholder — TracingConnectorWrapper stub
-# ---------------------------------------------------------------------------
-
-class TracingConnectorWrapper:
-    """Placeholder for the M3 tracing connector wrapper (§5.4).
-
-    In M2 this class is not used.  It is defined here so that M3 can
-    import and extend it without changing the module structure.
-
-    The full implementation in M3 will subclass ``KVConnectorBase_V1`` and
-    wrap all lifecycle methods (get_num_new_matched_tokens, start_load_kv,
-    wait_for_layer_load, save_kv_layer, wait_for_save, get_finished, …) with
-    transfer/start and transfer/end probe calls.
-    """
-
-    def __init__(self, inner: Any) -> None:
-        self.inner = inner
-
-    def __getattr__(self, name: str) -> Any:
-        # Pass through all attribute access to the inner connector.
-        return getattr(self.inner, name)
+def _original_factory() -> Optional[Any]:
+    """Return vLLM's native create_connector_v1 callable if importable."""
+    try:
+        from vllm.distributed.kv_transfer.kv_connector.factory import (  # type: ignore
+            KVConnectorFactory,
+        )
+    except Exception as exc:
+        logger.warning("bkvt[vllm]: KVConnectorFactory unavailable: %s", exc)
+        return None
+    return getattr(KVConnectorFactory, "create_connector_v1", None)

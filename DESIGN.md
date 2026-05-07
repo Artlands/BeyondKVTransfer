@@ -283,7 +283,7 @@ The `start` record carries `queued_ts_ns` and `started_ts_ns` (and `earliest_kno
 ```json
 {
   "ts_ns": ..., "type": "metadata",
-  "subtype": "prefix_lookup|prefix_insert|block_table_update|allocator_alloc|allocator_free|refcount_inc|refcount_dec|evict_select|hicache_promote|hicache_demote",
+  "subtype": "prefix_lookup|prefix_insert|block_table_update|allocator_alloc|allocator_free|refcount_inc|refcount_dec|evict_select|hicache_promote|hicache_demote|connector_build_meta|wait_for_layer_load|wait_for_save|connector_get_finished|nixl_call",
   "request_id": "...",
   "duration_ns": 12500,
   "n_keys": 24, "n_hits": 19, "hit_depth_tokens": 304,

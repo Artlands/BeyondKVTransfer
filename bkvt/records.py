@@ -265,7 +265,7 @@ class MetadataRecord:
     node_id: str
     worker_id: str
 
-    subtype: str   # prefix_lookup|prefix_insert|block_table_update|allocator_alloc|…
+    subtype: str   # prefix_lookup|prefix_insert|block_table_update|connector_*|…
 
     request_id: Optional[str] = None
     duration_ns: Optional[int] = None

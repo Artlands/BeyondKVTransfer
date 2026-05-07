@@ -18,7 +18,12 @@
         "evict_select",
         "hicache_promote", "hicache_demote",
         "scheduler_decision",
-        "clock_anchor"
+        "clock_anchor",
+        "connector_build_meta",
+        "wait_for_layer_load",
+        "wait_for_save",
+        "connector_get_finished",
+        "nixl_call"
       ]
     },
     "trace_id":   { "type": "string" },

@@ -25,6 +25,7 @@ Design constraints
     2. scheduler_probe        — arrival / admit / preempt / scheduler_decision
     3. block_pool_probe       — allocate / free / evict / prefix_hit / metadata
     4. runner_probe           — token records
+    5. connector factory      — wrap KVConnectorBase_V1 instances
 * API-version checking: if the wrapped function's signature has changed
   since this code was written a one-time WARN is emitted (§15.1).
 * apply() returns a dict summarising what was and wasn't patched, useful
@@ -116,7 +117,7 @@ def apply(config: Any = None) -> dict:
     -------
     dict
         ``{"applied": bool, "modules": {"scheduler": bool, "block_pool": bool,
-           "runner": bool}, "reason": str}``
+           "runner": bool, "connector": bool}, "reason": str}``
     """
     global _apply_result
 
@@ -130,7 +131,7 @@ def apply(config: Any = None) -> dict:
                 "applied": False,
                 "reason": "BKVT_ENABLE=0",
                 "modules": {"scheduler": False, "block_pool": False,
-                            "runner": False},
+                            "runner": False, "connector": False},
             }
             return _apply_result
 
@@ -165,13 +166,14 @@ def apply(config: Any = None) -> dict:
         sched_ok = scheduler_probe.apply_patches()
         bp_ok = block_pool_probe.apply_patches()
         runner_ok = runner_probe.apply_patches()
+        connector_ok = _patch_connector_factory()
 
-        any_ok = sched_ok or bp_ok or runner_ok
+        any_ok = sched_ok or bp_ok or runner_ok or connector_ok
 
         if any_ok:
             logger.info(
-                "bkvt[vllm]: M2 patches active — scheduler=%s block_pool=%s runner=%s",
-                sched_ok, bp_ok, runner_ok,
+                "bkvt[vllm]: patches active — scheduler=%s block_pool=%s runner=%s connector=%s",
+                sched_ok, bp_ok, runner_ok, connector_ok,
             )
         else:
             logger.warning(
@@ -186,6 +188,7 @@ def apply(config: Any = None) -> dict:
                 "scheduler": sched_ok,
                 "block_pool": bp_ok,
                 "runner": runner_ok,
+                "connector": connector_ok,
             },
         }
         return _apply_result
@@ -210,7 +213,70 @@ def reset() -> None:
         except Exception:
             pass
 
+    _reset_connector_factory_patch()
+
 
 def is_applied() -> bool:
     """Return True if apply() has been called and patches are active."""
     return _apply_result is not None and _apply_result.get("applied", False)
+
+
+_CONNECTOR_FACTORY_PATCHED = False
+_CONNECTOR_FACTORY_ORIGINAL: Any = None
+
+
+def _patch_connector_factory() -> bool:
+    """Monkey-patch vLLM connector creation to wrap returned connectors."""
+    global _CONNECTOR_FACTORY_PATCHED, _CONNECTOR_FACTORY_ORIGINAL
+
+    if _CONNECTOR_FACTORY_PATCHED:
+        return True
+
+    try:
+        from vllm.distributed.kv_transfer.kv_connector import factory as _factory_mod  # type: ignore
+        from bkvt.integrations.vllm.connector_wrapper import wrap_connector
+    except Exception as exc:
+        logger.debug("bkvt[vllm]: connector factory not patched: %s", exc)
+        return False
+
+    cls = getattr(_factory_mod, "KVConnectorFactory", None)
+    if cls is None:
+        return False
+
+    original = getattr(cls, "create_connector_v1", None)
+    if original is None:
+        return False
+
+    if getattr(original, "_bkvt_wrapped", False):
+        _CONNECTOR_FACTORY_PATCHED = True
+        return True
+
+    _CONNECTOR_FACTORY_ORIGINAL = original
+
+    def create_connector_v1_wrapper(*args: Any, **kwargs: Any) -> Any:
+        connector = original(*args, **kwargs)
+        return wrap_connector(connector)
+
+    create_connector_v1_wrapper._bkvt_wrapped = True  # type: ignore[attr-defined]
+    setattr(cls, "create_connector_v1", staticmethod(create_connector_v1_wrapper))
+    _CONNECTOR_FACTORY_PATCHED = True
+    logger.info("bkvt[vllm]: patched KVConnectorFactory.create_connector_v1")
+    return True
+
+
+def _reset_connector_factory_patch() -> None:
+    """Undo connector factory patch for tests."""
+    global _CONNECTOR_FACTORY_PATCHED, _CONNECTOR_FACTORY_ORIGINAL
+    if not _CONNECTOR_FACTORY_PATCHED or _CONNECTOR_FACTORY_ORIGINAL is None:
+        _CONNECTOR_FACTORY_PATCHED = False
+        _CONNECTOR_FACTORY_ORIGINAL = None
+        return
+    try:
+        from vllm.distributed.kv_transfer.kv_connector import factory as _factory_mod  # type: ignore
+        cls = getattr(_factory_mod, "KVConnectorFactory", None)
+        if cls is not None:
+            setattr(cls, "create_connector_v1", _CONNECTOR_FACTORY_ORIGINAL)
+    except Exception:
+        pass
+    _CONNECTOR_FACTORY_PATCHED = False
+    _CONNECTOR_FACTORY_ORIGINAL = None
