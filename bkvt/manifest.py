@@ -106,7 +106,7 @@ def _nixl_version() -> Optional[str]:
     return _try_version("nixl")
 
 
-def _chrony_offset_ns() -> Optional[int]:
+def chrony_offset_ns() -> Optional[int]:
     """Read chrony's current tracking offset in nanoseconds (best-effort)."""
     try:
         out = subprocess.check_output(
@@ -177,7 +177,7 @@ def build_manifest(emitter: "Emitter") -> dict:
     }
 
     # Chrony offset for cross-node skew correction (§7.4)
-    manifest["chrony_offset_ns"] = _chrony_offset_ns()
+    manifest["chrony_offset_ns"] = chrony_offset_ns()
 
     return manifest
 

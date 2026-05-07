@@ -232,6 +232,16 @@ class Emitter:
         # Dropped-record counter (a live sys_counter)
         self._dropped_total = 0
 
+        # System counters + periodic clock anchors (§7.3, §7.4, M6).
+        self._counter_collector = None
+        if config.sys_counter_hz > 0 or config.clock_anchor_hz > 0:
+            try:
+                from bkvt.collectors.sys_counters import SystemCounterCollector
+                self._counter_collector = SystemCounterCollector(self, config)
+                self._counter_collector.start()
+            except Exception as exc:
+                logger.warning("bkvt: failed to start system counter collector: %s", exc)
+
     # ------------------------------------------------------------------
     # Thread-local ring buffer
     # ------------------------------------------------------------------
@@ -466,10 +476,16 @@ class Emitter:
     def enabled(self) -> bool:
         return self._enabled
 
+    @property
+    def dropped_records_total(self) -> int:
+        return getattr(self, "_dropped_total", 0)
+
     def shutdown(self) -> None:
         """Flush pending records and stop the flusher thread."""
         if not self._enabled:
             return
+        if self._counter_collector is not None:
+            self._counter_collector.stop()
         self._stop_event.set()
         self._flusher.join(timeout=5.0)
 
