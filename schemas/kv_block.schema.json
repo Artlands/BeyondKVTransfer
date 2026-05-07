@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bkvt/schemas/kv_block.schema.json",
+  "title": "BeyondKVTransfer KV-Block Record (§4.4)",
+  "description": "One record per KV-block lifecycle event.",
+  "type": "object",
+  "required": ["ts_ns", "type", "subtype", "trace_id", "node_id", "worker_id", "v", "block_id"],
+  "properties": {
+    "ts_ns":      { "type": "integer" },
+    "type":       { "type": "string", "const": "kv_block" },
+    "subtype": {
+      "type": "string",
+      "enum": [
+        "allocate", "free", "evict",
+        "prefix_hit",
+        "tier_promote", "tier_demote",
+        "hash_insert", "hash_collide"
+      ]
+    },
+    "trace_id":   { "type": "string" },
+    "node_id":    { "type": "string" },
+    "worker_id":  { "type": "string" },
+    "v":          { "type": "integer", "const": 1 },
+
+    "block_id":   { "type": "integer" },
+    "block_hash": { "type": ["string", "null"] },
+    "layer_idx":  { "type": ["integer", "null"], "minimum": 0 },
+
+    "block_size_tokens": { "type": ["integer", "null"], "minimum": 1 },
+    "block_size_bytes":  { "type": ["integer", "null"], "minimum": 1 },
+
+    "tier_before": {
+      "type": ["string", "null"],
+      "enum": ["HBM_LOCAL", "HBM_PEER_NVLINK", "HBM_PEER_RDMA",
+               "DRAM_LOCAL", "DRAM_REMOTE", "SSD_LOCAL", "SSD_REMOTE",
+               "OBJECT_STORE", null]
+    },
+    "tier_after": {
+      "type": ["string", "null"],
+      "enum": ["HBM_LOCAL", "HBM_PEER_NVLINK", "HBM_PEER_RDMA",
+               "DRAM_LOCAL", "DRAM_REMOTE", "SSD_LOCAL", "SSD_REMOTE",
+               "OBJECT_STORE", null]
+    },
+
+    "owner_request_id":  { "type": ["string", "null"] },
+    "refcount_before":   { "type": ["integer", "null"], "minimum": 0 },
+    "refcount_after":    { "type": ["integer", "null"], "minimum": 0 },
+
+    "reason": {
+      "type": ["string", "null"],
+      "enum": [
+        "scheduler", "prefix_match", "connector_load",
+        "controller_promote", "capacity_evict", "finish_free", null
+      ]
+    },
+    "age_ns":            { "type": ["integer", "null"], "minimum": 0 },
+    "reuse_count":       { "type": ["integer", "null"], "minimum": 0 },
+    "last_reuse_ts_ns":  { "type": ["integer", "null"] },
+
+    "sample_decision":   { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+  },
+  "additionalProperties": true
+}

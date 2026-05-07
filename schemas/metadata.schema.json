@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bkvt/schemas/metadata.schema.json",
+  "title": "BeyondKVTransfer Metadata Record (§4.6)",
+  "description": "One record per metadata operation (prefix lookup, block-table update, clock anchor, scheduler decision, …).",
+  "type": "object",
+  "required": ["ts_ns", "type", "subtype", "trace_id", "node_id", "worker_id", "v"],
+  "properties": {
+    "ts_ns":      { "type": "integer" },
+    "type":       { "type": "string", "const": "metadata" },
+    "subtype": {
+      "type": "string",
+      "enum": [
+        "prefix_lookup", "prefix_insert",
+        "block_table_update",
+        "allocator_alloc", "allocator_free",
+        "refcount_inc", "refcount_dec",
+        "evict_select",
+        "hicache_promote", "hicache_demote",
+        "scheduler_decision",
+        "clock_anchor"
+      ]
+    },
+    "trace_id":   { "type": "string" },
+    "node_id":    { "type": "string" },
+    "worker_id":  { "type": "string" },
+    "v":          { "type": "integer", "const": 1 },
+
+    "request_id":  { "type": ["string", "null"] },
+    "duration_ns": { "type": ["integer", "null"], "minimum": 0 },
+
+    "n_keys":           { "type": ["integer", "null"], "minimum": 0 },
+    "n_hits":           { "type": ["integer", "null"], "minimum": 0 },
+    "hit_depth_tokens": { "type": ["integer", "null"], "minimum": 0 },
+
+    "tier_scope":  { "type": ["string", "null"] },
+    "structure": {
+      "type": ["string", "null"],
+      "enum": ["radix", "hashmap", "treelist", null]
+    },
+
+    "size_before": { "type": ["integer", "null"], "minimum": 0 },
+    "size_after":  { "type": ["integer", "null"], "minimum": 0 },
+
+    "scheduler_inputs":  { "type": ["object", "null"] },
+    "scheduler_outputs": { "type": ["object", "null"] },
+
+    "t0_unix_ns":        { "type": ["integer", "null"] },
+    "t0_monotonic_ns":   { "type": ["integer", "null"] },
+    "t0_cuda_event_ns":  { "type": ["integer", "null"] },
+    "chrony_offset_ns":  { "type": ["integer", "null"] },
+
+    "sample_decision":   { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+  },
+  "additionalProperties": true
+}

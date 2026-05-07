@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bkvt/schemas/token.schema.json",
+  "title": "BeyondKVTransfer Token Record (§4.3)",
+  "description": "One record per token or token-batch event.",
+  "type": "object",
+  "required": ["ts_ns", "type", "subtype", "trace_id", "node_id", "worker_id", "v", "request_id", "token_idx", "step_id"],
+  "properties": {
+    "ts_ns":       { "type": "integer" },
+    "type":        { "type": "string", "const": "token" },
+    "subtype": {
+      "type": "string",
+      "enum": ["prefill_chunk", "decode", "first_token"]
+    },
+    "trace_id":    { "type": "string" },
+    "node_id":     { "type": "string" },
+    "worker_id":   { "type": "string" },
+    "v":           { "type": "integer", "const": 1 },
+
+    "request_id":  { "type": "string" },
+    "seq_id":      { "type": ["string", "null"] },
+    "token_idx":   { "type": "integer", "minimum": 0 },
+    "step_id":     { "type": "integer", "minimum": 0 },
+    "num_tokens":  { "type": "integer", "minimum": 1, "default": 1 },
+    "num_prefill_tokens": { "type": "integer", "minimum": 0, "default": 0 },
+
+    "kernel_start_ts_ns": { "type": ["integer", "null"] },
+    "kernel_end_ts_ns":   { "type": ["integer", "null"] },
+    "cuda_event_ts_ns":   { "type": ["integer", "null"] },
+
+    "blocks_used_local":  { "type": ["integer", "null"], "minimum": 0 },
+    "blocks_used_remote": { "type": ["integer", "null"], "minimum": 0 },
+
+    "sample_decision":    { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+  },
+  "additionalProperties": true
+}

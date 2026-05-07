@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+wheels/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env/
+
+# Packaging / installer
+pip-wheel-metadata/
+MANIFEST
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.log
+
+# Type checking
+.mypy_cache/
+.pytype/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
+
+# Trace output (can be huge — keep out of the repo)
+bkvt_traces/
+*.jsonl
+*.jsonl.gz
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Build artifacts from native NCCL profiler plugin
+bkvt/native/**/*.o
+bkvt/native/**/*.a
+bkvt/native/**/*.so
+
+# Parquet / analysis artefacts
+analysis/**/*.parquet
+analysis/**/*.arrow

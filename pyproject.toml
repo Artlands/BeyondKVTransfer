@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bkvt"
+version = "0.1.0"
+description = "BeyondKVTransfer — Remote Memory Behavior Measurement Framework for Distributed LLM Serving"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "orjson>=3.9",
+    "pyyaml>=6.0",
+    "jsonschema>=4.21",
+]
+
+[project.optional-dependencies]
+analysis = [
+    "duckdb>=0.10",
+    "pyarrow>=14.0",
+    "pandas>=2.0",
+    "matplotlib>=3.8",
+    "jupyter>=1.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-timeout>=2.3",
+    "coverage>=7.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["bkvt*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+timeout = 60
+log_cli = true
+log_cli_level = "INFO"
+
+[tool.coverage.run]
+source = ["bkvt"]
+omit = ["tests/*", "scripts/*", "analysis/*"]

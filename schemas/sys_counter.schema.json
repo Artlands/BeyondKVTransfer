@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bkvt/schemas/sys_counter.schema.json",
+  "title": "BeyondKVTransfer System-Counter Record (§4.7)",
+  "description": "One sampled system-level counter reading (NIC, GPU, CPU, …).",
+  "type": "object",
+  "required": ["ts_ns", "type", "subtype", "trace_id", "node_id", "worker_id", "v", "scope", "value", "unit"],
+  "properties": {
+    "ts_ns":      { "type": "integer" },
+    "type":       { "type": "string", "const": "sys_counter" },
+    "subtype": {
+      "type": "string",
+      "enum": [
+        "nic_bytes", "nic_packets",
+        "ib_pkey_violation",
+        "nccl_p2p_bytes",
+        "gpu_sm_active",
+        "gpu_hbm_bw_used",
+        "gpu_pcie_bw_used",
+        "cpu_pagefault",
+        "host_dram_used",
+        "nvlink_bytes",
+        "process_rss",
+        "dropped_records"
+      ]
+    },
+    "trace_id":   { "type": "string" },
+    "node_id":    { "type": "string" },
+    "worker_id":  { "type": "string" },
+    "v":          { "type": "integer", "const": 1 },
+
+    "scope":       { "type": "string" },
+    "value":       { "type": "number" },
+    "unit": {
+      "type": "string",
+      "enum": ["bytes", "count", "percent", "bytes_per_s"]
+    },
+    "interval_ns": { "type": ["integer", "null"], "minimum": 0 }
+  },
+  "additionalProperties": true
+}

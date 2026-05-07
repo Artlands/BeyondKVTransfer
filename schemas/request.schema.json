@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bkvt/schemas/request.schema.json",
+  "title": "BeyondKVTransfer Request Record (§4.2)",
+  "description": "One record per request lifecycle event.",
+  "type": "object",
+  "required": ["ts_ns", "type", "subtype", "trace_id", "node_id", "worker_id", "v", "request_id"],
+  "properties": {
+    "ts_ns":       { "type": "integer" },
+    "type":        { "type": "string", "const": "request" },
+    "subtype": {
+      "type": "string",
+      "enum": ["arrival", "admit", "preempt", "resume", "finish", "abort"]
+    },
+    "trace_id":    { "type": "string" },
+    "node_id":     { "type": "string" },
+    "worker_id":   { "type": "string" },
+    "v":           { "type": "integer", "const": 1 },
+
+    "request_id":  { "type": "string" },
+    "seq_id":      { "type": ["string", "null"] },
+    "input_len":   { "type": ["integer", "null"], "minimum": 0 },
+    "output_len_so_far": { "type": ["integer", "null"], "minimum": 0 },
+    "max_output_len":    { "type": ["integer", "null"], "minimum": 0 },
+    "priority":    { "type": ["integer", "null"] },
+
+    "arrival_ts_ns":        { "type": ["integer", "null"] },
+    "first_schedule_ts_ns": { "type": ["integer", "null"] },
+    "first_token_ts_ns":    { "type": ["integer", "null"] },
+    "finish_ts_ns":         { "type": ["integer", "null"] },
+    "ttft_ns":              { "type": ["integer", "null"], "minimum": 0 },
+    "tpot_ns":              { "type": ["integer", "null"], "minimum": 0 },
+
+    "scheduler_state_snapshot": {
+      "type": ["object", "null"],
+      "properties": {
+        "running":     { "type": "integer", "minimum": 0 },
+        "waiting":     { "type": "integer", "minimum": 0 },
+        "swapped":     { "type": "integer", "minimum": 0 },
+        "free_blocks": { "type": "integer", "minimum": 0 },
+        "used_blocks": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "additionalProperties": true
+}

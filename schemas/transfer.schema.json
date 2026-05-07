@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bkvt/schemas/transfer.schema.json",
+  "title": "BeyondKVTransfer Transfer Record (§4.5)",
+  "description": "One record per transfer start, end, or cancel. A matching start+end pair MUST exist per transfer_id.",
+  "type": "object",
+  "required": ["ts_ns", "type", "subtype", "trace_id", "node_id", "worker_id", "v", "transfer_id", "direction"],
+  "properties": {
+    "ts_ns":        { "type": "integer" },
+    "type":         { "type": "string", "const": "transfer" },
+    "subtype":      { "type": "string", "enum": ["start", "end", "cancel"] },
+    "trace_id":     { "type": "string" },
+    "node_id":      { "type": "string" },
+    "worker_id":    { "type": "string" },
+    "v":            { "type": "integer", "const": 1 },
+
+    "transfer_id":  { "type": "string" },
+    "direction":    { "type": "string", "enum": ["load", "save"] },
+
+    "src": {
+      "type": ["object", "null"],
+      "properties": {
+        "tier":      { "type": "string" },
+        "node_id":   { "type": ["string", "null"] },
+        "device_id": { "type": ["integer", "null"] }
+      },
+      "required": ["tier"]
+    },
+    "dst": {
+      "type": ["object", "null"],
+      "properties": {
+        "tier":      { "type": "string" },
+        "node_id":   { "type": ["string", "null"] },
+        "device_id": { "type": ["integer", "null"] }
+      },
+      "required": ["tier"]
+    },
+
+    "transport": {
+      "type": ["string", "null"],
+      "enum": [
+        "nccl_p2p", "nccl_send_recv", "nixl", "gdrcopy",
+        "ib_verbs", "tcp", "local_memcpy", "file", null
+      ]
+    },
+
+    "request_id":   { "type": ["string", "null"] },
+    "layer_idx":    { "type": ["integer", "null"], "minimum": 0 },
+
+    "num_blocks":   { "type": ["integer", "null"], "minimum": 0 },
+    "bytes":        { "type": ["integer", "null"], "minimum": 0 },
+    "block_ids":    { "type": ["array", "null"], "items": { "type": "integer" } },
+
+    "queued_ts_ns":    { "type": ["integer", "null"] },
+    "started_ts_ns":   { "type": ["integer", "null"] },
+    "completed_ts_ns": { "type": ["integer", "null"] },
+    "queue_wait_ns":   { "type": ["integer", "null"], "minimum": 0 },
+    "wire_time_ns":    { "type": ["integer", "null"], "minimum": 0 },
+    "achieved_bw_gbps":{ "type": ["number", "null"],  "minimum": 0 },
+
+    "wr_count":             { "type": ["integer", "null"], "minimum": 0 },
+    "wr_completion_ts_ns":  { "type": ["array", "null"], "items": { "type": "integer" } },
+
+    "issued_by": {
+      "type": ["string", "null"],
+      "enum": ["scheduler", "connector", "cache_controller", "attention_layer", null]
+    },
+    "issued_at_phase": {
+      "type": ["string", "null"],
+      "enum": ["prefill", "decode", "prefetch", "spillover", null]
+    },
+
+    "earliest_known_ts_ns": { "type": ["integer", "null"] },
+    "sample_decision":      { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+  },
+  "additionalProperties": true
+}

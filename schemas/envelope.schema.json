@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bkvt/schemas/envelope.schema.json",
+  "title": "BeyondKVTransfer Common Envelope (§4.1)",
+  "description": "Required fields present on every trace record.",
+  "type": "object",
+  "required": ["ts_ns", "type", "subtype", "trace_id", "node_id", "worker_id", "v"],
+  "properties": {
+    "ts_ns": {
+      "type": "integer",
+      "description": "Monotonic nanoseconds since CLOCK_MONOTONIC_RAW at the time of the event."
+    },
+    "type": {
+      "type": "string",
+      "enum": ["request", "token", "kv_block", "transfer", "metadata", "sys_counter"],
+      "description": "Top-level record type."
+    },
+    "subtype": {
+      "type": "string",
+      "description": "Event-specific subtype; see per-type schemas for valid values."
+    },
+    "trace_id": {
+      "type": "string",
+      "description": "UUID v4 identifying one framework launch."
+    },
+    "node_id": {
+      "type": "string",
+      "description": "Hostname or HOSTNAME-LOCAL_RANK."
+    },
+    "worker_id": {
+      "type": "string",
+      "description": "node_id/tpN/ppN for vLLM; role-rank for SGLang PD."
+    },
+    "v": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version."
+    }
+  }
+}
