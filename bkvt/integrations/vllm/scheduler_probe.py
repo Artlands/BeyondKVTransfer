@@ -441,7 +441,7 @@ def make_finish_request_wrapper(original: Callable) -> Callable:
 
         ttft_ns: Optional[int] = None
         tpot_ns: Optional[int] = None
-        if arrival_ts and first_token_ts:
+        if arrival_ts and first_token_ts and first_token_ts >= arrival_ts:
             ttft_ns = first_token_ts - arrival_ts
         if first_token_ts and output_tokens > 1 and ts > first_token_ts:
             tpot_ns = (ts - first_token_ts) // max(output_tokens - 1, 1)

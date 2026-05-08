@@ -214,14 +214,17 @@ class Emitter:
         out_path = os.path.join(trace_dir, worker_safe)
         self._outfile = _OutputFile(out_path, config.rotate_bytes)
 
-        # Flush state
+        # Flush state — "4 MiB or 100 ms, whichever first" (DESIGN §8.1)
         self._flush_bytes = config.flush_bytes
         self._flush_interval_s = 0.1  # 100 ms
-        self._pending: list[bytes] = []
-        self._pending_size = 0
+        # Approximate byte count of un-flushed records (updated under GIL;
+        # intentionally imprecise — used only to trigger early flush).
+        self._pending_approx_bytes: int = 0
 
         # Background flusher
         self._stop_event = threading.Event()
+        # Signalled by event() when pending bytes exceed flush_bytes threshold.
+        self._flush_trigger = threading.Event()
         self._flusher = threading.Thread(
             target=self._flusher_loop,
             name="bkvt-flusher",
@@ -270,6 +273,12 @@ class Emitter:
         record.setdefault("v", 1)
         if not self._get_buf().put(record):
             self._dropped_total += 1
+        else:
+            # Conservative per-record byte estimate for early-flush heuristic.
+            self._pending_approx_bytes += 256
+            if self._pending_approx_bytes >= self._flush_bytes:
+                self._pending_approx_bytes = 0
+                self._flush_trigger.set()
 
     def transfer_start(
         self,
@@ -430,10 +439,17 @@ class Emitter:
     # ------------------------------------------------------------------
 
     def _flusher_loop(self) -> None:
-        """Background thread: drain ring buffers → serialize → write."""
+        """Background thread: drain ring buffers → serialize → write.
+
+        Wakes on either the 100 ms interval *or* when event() signals that
+        ~flush_bytes worth of records have accumulated (DESIGN §8.1).
+        """
         while not self._stop_event.is_set():
+            # Wake on size threshold or timeout — whichever comes first.
+            self._flush_trigger.wait(self._flush_interval_s)
+            self._flush_trigger.clear()
+            self._pending_approx_bytes = 0
             self._flush_once()
-            self._stop_event.wait(self._flush_interval_s)
         # Final drain
         self._flush_once()
         self._outfile.close()

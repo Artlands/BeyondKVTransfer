@@ -108,10 +108,11 @@ def test_scheduler_lifecycle_and_q6_records(bkvt_env):
     run_batch = make_run_batch_wrapper(run_orig)
     run_batch(scheduler)
 
-    from bkvt.clock import now_ns
-
-    now = now_ns()
-    get_tracker().update("sg-req-1", first_token_ts_ns=now - 10_000_000)
+    # Set first_token_ts_ns to 10 ms *after* arrival so the guard condition
+    # (first_token_ts >= arrival_ts) in scheduler_probe is always satisfied,
+    # regardless of how fast the test machine is.
+    arrival_ts = get_tracker().get("sg-req-1").get("arrival_ts_ns", 0)
+    get_tracker().update("sg-req-1", first_token_ts_ns=arrival_ts + 10_000_000)
 
     def finish_orig(self, finished_reqs):
         return None

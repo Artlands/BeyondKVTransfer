@@ -446,9 +446,6 @@ def make_get_computed_blocks_wrapper(original: Callable) -> Callable:
                 "tier_before": "HBM_LOCAL",
                 "tier_after": "HBM_LOCAL",
                 "reason": "prefix_match",
-                # Q5: earliest_known_ts_ns = this lookup time
-                # Stored so the transfer probe can pick it up
-                "_earliest_known_ts_ns": t_start,
             }
             if request_id:
                 rec["owner_request_id"] = request_id
