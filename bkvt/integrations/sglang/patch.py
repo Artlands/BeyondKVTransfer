@@ -41,6 +41,7 @@ def apply(config: Any = None) -> dict:
                     "radix": False,
                     "hicache": False,
                     "disagg": False,
+                    "weight": False,
                 },
             }
             return _apply_result
@@ -52,21 +53,24 @@ def apply(config: Any = None) -> dict:
             hicache_probe,
             radix_probe,
             scheduler_probe,
+            weight_probe,
         )
 
         scheduler_ok = scheduler_probe.apply_patches()
         radix_ok = radix_probe.apply_patches()
         hicache_ok = hicache_probe.apply_patches()
         disagg_ok = disagg_probe.apply_patches()
-        any_ok = scheduler_ok or radix_ok or hicache_ok or disagg_ok
+        weight_ok = weight_probe.apply_patches()
+        any_ok = scheduler_ok or radix_ok or hicache_ok or disagg_ok or weight_ok
 
         if any_ok:
             logger.info(
-                "bkvt[sglang]: patches active -- scheduler=%s radix=%s hicache=%s disagg=%s",
+                "bkvt[sglang]: patches active -- scheduler=%s radix=%s hicache=%s disagg=%s weight=%s",
                 scheduler_ok,
                 radix_ok,
                 hicache_ok,
                 disagg_ok,
+                weight_ok,
             )
         else:
             logger.warning(
@@ -82,6 +86,7 @@ def apply(config: Any = None) -> dict:
                 "radix": radix_ok,
                 "hicache": hicache_ok,
                 "disagg": disagg_ok,
+                "weight": weight_ok,
             },
         }
         return _apply_result
@@ -99,6 +104,7 @@ def reset() -> None:
         "bkvt.integrations.sglang.radix_probe",
         "bkvt.integrations.sglang.hicache_probe",
         "bkvt.integrations.sglang.disagg_probe",
+        "bkvt.integrations.sglang.weight_probe",
     ):
         try:
             mod = importlib.import_module(mod_name)

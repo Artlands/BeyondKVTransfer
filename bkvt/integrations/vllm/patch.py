@@ -26,6 +26,7 @@ Design constraints
     3. block_pool_probe       — allocate / free / evict / prefix_hit / metadata
     4. runner_probe           — token records
     5. connector factory      — wrap KVConnectorBase_V1 instances
+    6. weight_probe           — Q7 weight/adaptor probe sites
 * API-version checking: if the wrapped function's signature has changed
   since this code was written a one-time WARN is emitted (§15.1).
 * apply() returns a dict summarising what was and wasn't patched, useful
@@ -131,7 +132,7 @@ def apply(config: Any = None) -> dict:
                 "applied": False,
                 "reason": "BKVT_ENABLE=0",
                 "modules": {"scheduler": False, "block_pool": False,
-                            "runner": False, "connector": False},
+                            "runner": False, "connector": False, "weight": False},
             }
             return _apply_result
 
@@ -161,19 +162,20 @@ def apply(config: Any = None) -> dict:
             pass
 
         # ── Apply probes ─────────────────────────────────────────────────
-        from bkvt.integrations.vllm import scheduler_probe, block_pool_probe, runner_probe
+        from bkvt.integrations.vllm import scheduler_probe, block_pool_probe, runner_probe, weight_probe
 
         sched_ok = scheduler_probe.apply_patches()
         bp_ok = block_pool_probe.apply_patches()
         runner_ok = runner_probe.apply_patches()
         connector_ok = _patch_connector_factory()
+        weight_ok = weight_probe.apply_patches()
 
-        any_ok = sched_ok or bp_ok or runner_ok or connector_ok
+        any_ok = sched_ok or bp_ok or runner_ok or connector_ok or weight_ok
 
         if any_ok:
             logger.info(
-                "bkvt[vllm]: patches active — scheduler=%s block_pool=%s runner=%s connector=%s",
-                sched_ok, bp_ok, runner_ok, connector_ok,
+                "bkvt[vllm]: patches active — scheduler=%s block_pool=%s runner=%s connector=%s weight=%s",
+                sched_ok, bp_ok, runner_ok, connector_ok, weight_ok,
             )
         else:
             logger.warning(
@@ -189,6 +191,7 @@ def apply(config: Any = None) -> dict:
                 "block_pool": bp_ok,
                 "runner": runner_ok,
                 "connector": connector_ok,
+                "weight": weight_ok,
             },
         }
         return _apply_result
@@ -206,6 +209,7 @@ def reset() -> None:
         "bkvt.integrations.vllm.scheduler_probe",
         "bkvt.integrations.vllm.block_pool_probe",
         "bkvt.integrations.vllm.runner_probe",
+        "bkvt.integrations.vllm.weight_probe",
     ):
         try:
             mod = importlib.import_module(mod_name)

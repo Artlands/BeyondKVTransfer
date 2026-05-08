@@ -39,13 +39,19 @@
     "transport": {
       "type": ["string", "null"],
       "enum": [
-        "nccl_p2p", "nccl_send_recv", "nixl", "gdrcopy",
-        "ib_verbs", "tcp", "local_memcpy", "file", null
+        "nccl_p2p", "nccl_send_recv", "nccl_allgather", "nccl_broadcast",
+        "nixl", "gdrcopy", "ib_verbs", "tcp", "local_memcpy",
+        "file", "object_store", "mmap", null
       ]
     },
 
+    "payload_kind": { "type": ["string", "null"], "enum": ["kv", "weight", "activation", null] },
     "request_id":   { "type": ["string", "null"] },
     "layer_idx":    { "type": ["integer", "null"], "minimum": 0 },
+    "param_name":   { "type": ["string", "null"] },
+    "expert_id":    { "type": ["integer", "null"], "minimum": 0 },
+    "lora_adapter_id": { "type": ["string", "null"] },
+    "weight_version": { "type": ["string", "null"] },
 
     "num_blocks":   { "type": ["integer", "null"], "minimum": 0 },
     "bytes":        { "type": ["integer", "null"], "minimum": 0 },
@@ -63,7 +69,7 @@
 
     "issued_by": {
       "type": ["string", "null"],
-      "enum": ["scheduler", "connector", "cache_controller", "attention_layer", null]
+      "enum": ["scheduler", "connector", "cache_controller", "attention_layer", "model_loader", "lora_manager", "weight_update", "moe_layer", null]
     },
     "issued_at_phase": {
       "type": ["string", "null"],

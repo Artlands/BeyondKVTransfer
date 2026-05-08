@@ -28,6 +28,11 @@ from analysis.lib.critical_path import (  # noqa: E402
 from analysis.lib.load import RECORD_TYPES, load_trace, require_manifest  # noqa: E402
 from analysis.lib.prefetch import prefetch_slack  # noqa: E402
 from analysis.lib.reuse import reuse_distance, tier_residency  # noqa: E402
+from analysis.lib.weights import (  # noqa: E402
+    lora_swap_latency,
+    per_family_byte_rollup,
+    weight_update_windows,
+)
 
 
 def build_index(
@@ -57,6 +62,9 @@ def build_index(
     tables["scheduler_tail_latency"] = scheduler_tail_latency(
         tables["metadata"], tables["request_lifecycle"]
     )
+    tables["weight_bytes"] = per_family_byte_rollup(tables["weight_block"], tables["transfer"])
+    tables["lora_swap_latency"] = lora_swap_latency(tables["weight_block"], tables["transfer"])
+    tables["weight_update_windows"] = weight_update_windows(tables["weight_block"], tables["transfer"])
 
     for name, table in tables.items():
         _write_table(table, out / name, output_format)

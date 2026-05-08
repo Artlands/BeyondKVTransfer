@@ -208,6 +208,7 @@ class TransferRecord:
     subtype: str        # start|end|cancel
     transfer_id: str
     direction: str      # load|save
+    payload_kind: str = "kv"  # kv|weight|activation
 
     src: Optional[TransferEndpoint] = None
     dst: Optional[TransferEndpoint] = None
@@ -215,6 +216,10 @@ class TransferRecord:
     transport: Optional[str] = None  # nccl_p2p|nccl_send_recv|nixl|gdrcopy|…
     request_id: Optional[str] = None
     layer_idx: Optional[int] = None
+    param_name: Optional[str] = None
+    expert_id: Optional[int] = None
+    lora_adapter_id: Optional[str] = None
+    weight_version: Optional[str] = None
 
     num_blocks: Optional[int] = None
     bytes: Optional[int] = None
@@ -301,6 +306,45 @@ class MetadataRecord:
 
 
 # ---------------------------------------------------------------------------
+# §4.4b Weight-block record
+# ---------------------------------------------------------------------------
+
+@dataclasses.dataclass
+class WeightBlockRecord:
+    """One record per weight/adaptor lifecycle event (§4.4b)."""
+
+    # Envelope
+    ts_ns: int
+    trace_id: str
+    node_id: str
+    worker_id: str
+
+    subtype: str
+    param_name: str
+
+    shape: Optional[list[int]] = None
+    dtype: Optional[str] = None
+    bytes: Optional[int] = None
+    layer_idx: Optional[int] = None
+    expert_id: Optional[int] = None
+    shard_role: Optional[str] = None
+    lora_adapter_id: Optional[str] = None
+    weight_version: Optional[str] = None
+    tier_before: Optional[str] = None
+    tier_after: Optional[str] = None
+    owner_request_id: Optional[str] = None
+    reason: Optional[str] = None
+    sample_decision: Optional[float] = None
+
+    v: int = SCHEMA_VERSION
+
+    def to_dict(self) -> dict:
+        d = dataclasses.asdict(self)
+        d["type"] = "weight_block"
+        return _strip_none(d)
+
+
+# ---------------------------------------------------------------------------
 # §4.7 System-counter record
 # ---------------------------------------------------------------------------
 
@@ -337,6 +381,7 @@ AnyRecord = (
     RequestRecord
     | TokenRecord
     | KVBlockRecord
+    | WeightBlockRecord
     | TransferRecord
     | MetadataRecord
     | SysCounterRecord
@@ -346,6 +391,7 @@ RECORD_TYPES: tuple[type, ...] = (
     RequestRecord,
     TokenRecord,
     KVBlockRecord,
+    WeightBlockRecord,
     TransferRecord,
     MetadataRecord,
     SysCounterRecord,

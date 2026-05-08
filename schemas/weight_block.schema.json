@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bkvt/schemas/weight_block.schema.json",
+  "title": "BeyondKVTransfer Weight-Block Record (§4.4b)",
+  "description": "One record per model-weight, expert, LoRA adapter, or online-update lifecycle event.",
+  "type": "object",
+  "required": ["ts_ns", "type", "subtype", "trace_id", "node_id", "worker_id", "v", "param_name"],
+  "properties": {
+    "ts_ns":      { "type": "integer" },
+    "type":       { "type": "string", "const": "weight_block" },
+    "subtype": {
+      "type": "string",
+      "enum": [
+        "load", "free", "expert_dispatch", "expert_release",
+        "lora_activate", "lora_deactivate",
+        "tier_promote", "tier_demote",
+        "update_apply", "hash_insert"
+      ]
+    },
+    "trace_id":   { "type": "string" },
+    "node_id":    { "type": "string" },
+    "worker_id":  { "type": "string" },
+    "v":          { "type": "integer", "const": 1 },
+
+    "param_name": { "type": "string" },
+    "shape":      { "type": ["array", "null"], "items": { "type": "integer" } },
+    "dtype":      { "type": ["string", "null"] },
+    "bytes":      { "type": ["integer", "null"], "minimum": 0 },
+    "layer_idx":  { "type": ["integer", "null"], "minimum": 0 },
+    "expert_id":  { "type": ["integer", "null"], "minimum": 0 },
+    "shard_role": { "type": ["string", "null"] },
+    "lora_adapter_id": { "type": ["string", "null"] },
+    "weight_version":  { "type": ["string", "null"] },
+
+    "tier_before": {
+      "type": ["string", "null"],
+      "enum": ["HBM_LOCAL", "HBM_PEER_NVLINK", "HBM_PEER_RDMA",
+               "DRAM_LOCAL", "DRAM_REMOTE", "SSD_LOCAL", "SSD_REMOTE",
+               "OBJECT_STORE", null]
+    },
+    "tier_after": {
+      "type": ["string", "null"],
+      "enum": ["HBM_LOCAL", "HBM_PEER_NVLINK", "HBM_PEER_RDMA",
+               "DRAM_LOCAL", "DRAM_REMOTE", "SSD_LOCAL", "SSD_REMOTE",
+               "OBJECT_STORE", null]
+    },
+    "owner_request_id": { "type": ["string", "null"] },
+    "reason": {
+      "type": ["string", "null"],
+      "enum": [
+        "startup_load", "cpu_offload", "expert_routing",
+        "lora_swap", "rlhf_update", "capacity_evict", null
+      ]
+    },
+    "sample_decision": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+  },
+  "additionalProperties": true
+}

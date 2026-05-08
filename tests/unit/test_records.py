@@ -23,6 +23,7 @@ from bkvt.records import (
     TokenRecord,
     TransferEndpoint,
     TransferRecord,
+    WeightBlockRecord,
     _strip_none,
 )
 
@@ -245,6 +246,53 @@ class TestTransferRecord:
         r = self._make(earliest_known_ts_ns=500, started_ts_ns=700)
         d = r.to_dict()
         assert d["earliest_known_ts_ns"] == 500
+
+    def test_payload_kind_defaults_to_kv(self):
+        assert self._make().to_dict()["payload_kind"] == "kv"
+
+    def test_weight_identity_fields(self):
+        r = self._make(
+            payload_kind="weight",
+            param_name="model.layers.0.mlp.weight",
+            lora_adapter_id="adapter-a",
+            weight_version="v1",
+        )
+        d = r.to_dict()
+        assert d["payload_kind"] == "weight"
+        assert d["param_name"] == "model.layers.0.mlp.weight"
+        assert d["lora_adapter_id"] == "adapter-a"
+
+
+# ---------------------------------------------------------------------------
+# WeightBlockRecord
+# ---------------------------------------------------------------------------
+
+class TestWeightBlockRecord:
+    def _make(self, subtype="load", **kw):
+        return WeightBlockRecord(
+            **_ENVELOPE,
+            subtype=subtype,
+            param_name="model.layers.0.mlp.weight",
+            **kw,
+        )
+
+    def test_type_field(self):
+        assert self._make().to_dict()["type"] == "weight_block"
+
+    def test_lora_fields(self):
+        d = self._make(
+            subtype="lora_activate",
+            lora_adapter_id="adapter-a",
+            tier_before=Tier.DRAM_LOCAL,
+            tier_after=Tier.HBM_LOCAL,
+            reason="lora_swap",
+        ).to_dict()
+        assert d["lora_adapter_id"] == "adapter-a"
+        assert d["reason"] == "lora_swap"
+
+    def test_update_version(self):
+        d = self._make(subtype="update_apply", weight_version="update-1").to_dict()
+        assert d["weight_version"] == "update-1"
 
 
 # ---------------------------------------------------------------------------

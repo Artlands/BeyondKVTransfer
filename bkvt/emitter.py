@@ -199,11 +199,11 @@ class Emitter:
         self._tls = threading.local()
 
         # Track which transfer_ids had their start record actually emitted.
-        # Maps transfer_id -> direction ("load"|"save").
+        # Maps transfer_id -> (direction, payload_kind).
         # transfer_end() only emits if the id is in this map (avoids orphans
         # when transfer sampling rate < 1.0), and re-uses the direction so the
-        # end record also carries the required `direction` field.
-        self._live_transfers: dict[str, str] = {}
+        # end record also carries required transfer classification fields.
+        self._live_transfers: dict[str, tuple[str, str]] = {}
         self._live_transfers_lock = threading.Lock()
 
         # Output file
@@ -284,6 +284,7 @@ class Emitter:
         self,
         direction: str,
         *,
+        payload_kind: str = "kv",
         request_id: Optional[str] = None,
         layer_idx: Optional[int] = None,
         src_tier: Optional[str] = None,
@@ -313,6 +314,7 @@ class Emitter:
             "subtype": "start",
             "transfer_id": transfer_id,
             "direction": direction,
+            "payload_kind": payload_kind,
             "started_ts_ns": ts,
             "queued_ts_ns": ts,
         }
@@ -343,7 +345,7 @@ class Emitter:
         rec.update(extra)
         self.event(rec)
         with self._live_transfers_lock:
-            self._live_transfers[transfer_id] = direction
+            self._live_transfers[transfer_id] = (direction, payload_kind)
         return transfer_id
 
     def transfer_end(
@@ -366,9 +368,10 @@ class Emitter:
         if not self._enabled:
             return
         with self._live_transfers_lock:
-            direction = self._live_transfers.pop(transfer_id, None)
-        if direction is None:
+            transfer_meta = self._live_transfers.pop(transfer_id, None)
+        if transfer_meta is None:
             return  # start was sampled away or already reaped; drop end too
+        direction, payload_kind = transfer_meta
 
         ts = now_ns()
         rec: dict = {
@@ -377,6 +380,7 @@ class Emitter:
             "subtype": "cancel" if cancelled else "end",
             "transfer_id": transfer_id,
             "direction": direction,   # carried from start record (required by schema)
+            "payload_kind": payload_kind,
             "completed_ts_ns": ts,
         }
         if bytes_ is not None:

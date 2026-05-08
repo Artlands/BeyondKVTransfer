@@ -15,7 +15,7 @@ from typing import Iterable, Iterator
 
 import pandas as pd
 
-RECORD_TYPES = ("request", "token", "kv_block", "transfer", "metadata", "sys_counter")
+RECORD_TYPES = ("request", "token", "kv_block", "weight_block", "transfer", "metadata", "sys_counter")
 
 
 def require_manifest(trace_path: str | os.PathLike[str]) -> Path:
@@ -85,7 +85,16 @@ def load_index(index_path: str | os.PathLike[str]) -> dict[str, pd.DataFrame]:
 
     root = Path(index_path)
     tables: dict[str, pd.DataFrame] = {}
-    for name in (*RECORD_TYPES, "transfer_pairs", "request_lifecycle", "prefetch_slack", "tier_residency"):
+    for name in (
+        *RECORD_TYPES,
+        "transfer_pairs",
+        "request_lifecycle",
+        "prefetch_slack",
+        "tier_residency",
+        "weight_bytes",
+        "lora_swap_latency",
+        "weight_update_windows",
+    ):
         parquet = root / f"{name}.parquet"
         jsonl = root / f"{name}.jsonl"
         if parquet.exists():
@@ -112,4 +121,3 @@ def _flatten_record(record: dict) -> dict:
             for key, item in value.items():
                 flat[f"{endpoint}_{key}"] = item
     return flat
-

@@ -12,7 +12,7 @@
     },
     "type": {
       "type": "string",
-      "enum": ["request", "token", "kv_block", "transfer", "metadata", "sys_counter"],
+      "enum": ["request", "token", "kv_block", "weight_block", "transfer", "metadata", "sys_counter"],
       "description": "Top-level record type."
     },
     "subtype": {

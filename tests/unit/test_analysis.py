@@ -96,6 +96,55 @@ def test_build_index_jsonl_smoke(tmp_path: Path) -> None:
         },
         {
             "ts_ns": 180,
+            "type": "weight_block",
+            "subtype": "lora_activate",
+            "trace_id": "trace-1",
+            "node_id": "node-0",
+            "worker_id": "worker-0",
+            "param_name": "lora.adapter-a",
+            "lora_adapter_id": "adapter-a",
+            "bytes": 512,
+            "tier_before": "DRAM_LOCAL",
+            "tier_after": "HBM_LOCAL",
+            "reason": "lora_swap",
+            "v": 1,
+        },
+        {
+            "ts_ns": 181,
+            "type": "transfer",
+            "subtype": "start",
+            "trace_id": "trace-1",
+            "node_id": "node-0",
+            "worker_id": "worker-0",
+            "transfer_id": "xfer-lora",
+            "direction": "load",
+            "payload_kind": "weight",
+            "lora_adapter_id": "adapter-a",
+            "param_name": "lora.adapter-a",
+            "transport": "local_memcpy",
+            "bytes": 512,
+            "started_ts_ns": 181,
+            "earliest_known_ts_ns": 180,
+            "src": {"tier": "DRAM_LOCAL"},
+            "dst": {"tier": "HBM_LOCAL"},
+            "v": 1,
+        },
+        {
+            "ts_ns": 186,
+            "type": "transfer",
+            "subtype": "end",
+            "trace_id": "trace-1",
+            "node_id": "node-0",
+            "worker_id": "worker-0",
+            "transfer_id": "xfer-lora",
+            "direction": "load",
+            "payload_kind": "weight",
+            "completed_ts_ns": 186,
+            "wire_time_ns": 5,
+            "v": 1,
+        },
+        {
+            "ts_ns": 180,
             "type": "metadata",
             "subtype": "prefix_lookup",
             "trace_id": "trace-1",
@@ -129,9 +178,12 @@ def test_build_index_jsonl_smoke(tmp_path: Path) -> None:
     out = tmp_path / "index"
     counts = build_index(trace, out, output_format="jsonl")
     assert counts["request_lifecycle"] == 1
-    assert counts["transfer_pairs"] == 1
-    assert counts["prefetch_slack"] == 1
+    assert counts["transfer_pairs"] == 2
+    assert counts["prefetch_slack"] == 2
+    assert counts["weight_bytes"] == 2
+    assert counts["lora_swap_latency"] == 1
 
     indexed = load_index(out)
     assert indexed["request_lifecycle"].iloc[0]["ttft_ns"] == 200
     assert indexed["prefetch_slack"].iloc[0]["prefetch_slack_ns"] == 50
+    assert indexed["lora_swap_latency"].iloc[0]["lora_latency_ns"] == 5

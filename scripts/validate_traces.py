@@ -66,6 +66,7 @@ _SCHEMA_TYPE_MAP: dict[str, str] = {
     "request":     "request.schema.json",
     "token":       "token.schema.json",
     "kv_block":    "kv_block.schema.json",
+    "weight_block": "weight_block.schema.json",
     "transfer":    "transfer.schema.json",
     "metadata":    "metadata.schema.json",
     "sys_counter": "sys_counter.schema.json",
