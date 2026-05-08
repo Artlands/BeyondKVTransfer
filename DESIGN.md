@@ -15,7 +15,7 @@ This document is the single authoritative specification for the measurement fram
 - **Section 4** defines the on-disk JSON record schemas. Every probe emits one of these record types; agents must not invent new top-level types without updating this section.
 - **Sections 5–7** are the *hook map*: where, in vLLM and SGLang, each probe is inserted. File paths are given relative to each project's repo root.
 - **Sections 8–10** describe the trace pipeline, overhead budget, and sampling.
-- **Section 11** maps events back to the six research questions so an agent can confirm coverage.
+- **Section 11** maps events back to the seven research questions so an agent can confirm coverage.
 - **Sections 12–15** cover configuration, repository layout, milestones, and risks.
 
 When a section says **MUST**, an implementation that violates it is wrong. **SHOULD** is a strong recommendation; deviations require a written justification in the PR description.
@@ -30,7 +30,9 @@ We want to characterize how distributed LLM-serving systems use *remote* memory 
 - KV blocks that live on a peer GPU on a different node (RDMA via NIXL, IB Verbs, GDRCopy).
 - KV blocks that have been offloaded to host DRAM, SSD, or an external KV cache pool (LMCache, Mooncake Store, HiCache L2/L3).
 
-The framework MUST produce evidence to answer the following six questions.-
+The framework also extends to **non-KV tensor traffic** that crosses the same fabrics — model weights and (optionally) activations. Weight-bearing remote operations include sharded all-gathers under FSDP/ZeRO-style sharding, MoE expert-weight dispatch under expert parallelism, weight streaming from disk or object store at load time, layerwise CPU↔GPU offload during inference, LoRA adapter hot-swaps, and online weight updates from a training process during RLHF. These share the transports and tier hierarchy of §2.3, so we reuse the same record schema with a `payload_kind` discriminator (§4.5) plus a payload-specific `weight_block` record type (§4.4b), rather than inventing a parallel pipeline.
+
+The framework MUST produce evidence to answer the following seven questions.
 
 ### Q1. Remote KV data path
 *How much KV data moves remotely, at what granularity, and when?*
@@ -56,7 +58,11 @@ For each "use" of a remote block, we need both the *first instant the system cou
 *How do placement decisions affect remote traffic, cache hit rate, and tail latency?*
 For each scheduling decision (admit, preempt, route to prefill/decode worker, choose KV-pool tier) we record the inputs the scheduler saw and the resulting placement. Cross-referenced against Q1/Q4 events, this lets us isolate the effect of scheduling policy from workload variance.
 
-These six questions drive every probe in §5–§7. Section 11 is the back-pointer table: for each question, which probes feed it.
+### Q7. Remote weight & adapter traffic
+*How much weight-bearing data moves remotely, when, and from where?*
+Weights and adapters cross the same fabrics as KV but on different schedules: bulk at startup, layerwise during CPU offload, per-expert per-step under EP, per-request on LoRA hot-swap, and bursty during online weight updates. We measure byte volume, transport, source/destination tier, and timing for each weight-bearing transfer, plus the per-event metadata needed to attribute it to a layer, expert, adapter, or weight-version. The same critical-path (Q3) and prefetchability (Q5) analyses apply, since weight stalls show up in TTFT/TPOT exactly like KV stalls do.
+
+These seven questions drive every probe in §5–§7. Section 11 is the back-pointer table: for each question, which probes feed it.
 
 ---
 
@@ -119,7 +125,9 @@ For trace classification we use a single `tier` enum on every memory location:
 tier ∈ { HBM_LOCAL, HBM_PEER_NVLINK, HBM_PEER_RDMA, DRAM_LOCAL, DRAM_REMOTE, SSD_LOCAL, SSD_REMOTE, OBJECT_STORE }
 ```
 
-A transfer is "remote" iff `src.tier != HBM_LOCAL` or `dst.tier != HBM_LOCAL` from the perspective of the GPU executing the dependent attention kernel. The tier is recorded on every block and every transfer (§4.4–§4.5) so analysis can re-bucket as needed.
+A transfer is "remote" iff `src.tier != HBM_LOCAL` or `dst.tier != HBM_LOCAL` from the perspective of the GPU executing the dependent kernel. The tier is recorded on every block and every transfer (§4.4–§4.5) so analysis can re-bucket as needed.
+
+Each transfer additionally carries a `payload_kind ∈ { kv, weight, activation }` discriminator (§4.5). The "dependent kernel" used to define remoteness depends on the payload: the next attention kernel for `kv`, the next matmul / MoE / projection kernel for `weight`, and the next layer's forward for `activation`. KV-block records (§4.4) and weight-block records (§4.4b) are payload-specific extensions; transfer records are unified across payloads.
 
 ---
 
@@ -149,13 +157,14 @@ All timestamps are **integer nanoseconds since `CLOCK_MONOTONIC_RAW`**, captured
 
 ### 3.3 Event taxonomy (six levels)
 
-| Level | Cardinality (per request, typical) | Examples |
+| Level | Cardinality (typical) | Examples |
 |---|---|---|
-| Request | 1 | arrival, schedule-admit, finish |
-| Token | input_len + output_len | token-decode, first-token |
-| KV-block | 10²–10³ | block-allocate, block-evict, block-tier-transition |
-| Transfer | 10¹–10³ | start_load_kv, wait_for_layer_load, save_kv_layer, RDMA WR done |
-| Metadata | 10²–10⁴ | prefix lookup, refcount inc/dec, hash insert, block-table update |
+| Request | 1 per request | arrival, schedule-admit, finish |
+| Token | input_len + output_len per request | token-decode, first-token |
+| KV-block | 10²–10³ per request | block-allocate, block-evict, block-tier-transition |
+| Weight-block | 10³–10⁴ once at startup; 10⁰–10² per scheduler step under EP/LoRA; 10² per RLHF weight update | weight-load, expert-dispatch, lora-activate, weight-update-apply |
+| Transfer | 10¹–10³ per request (kv) plus weight transfers as above | start_load_kv, wait_for_layer_load, save_kv_layer, RDMA WR done, weight all-gather, weight broadcast |
+| Metadata | 10²–10⁴ per request | prefix lookup, refcount inc/dec, hash insert, block-table update |
 | System counter | sampled (1–100 Hz) | NIC bytes, NCCL p2p, GPU SM occupancy, HBM BW, page-fault rate |
 
 The framework writes one JSON record per event. Schemas in §4.
@@ -247,20 +256,51 @@ Notes:
 - `tier_before == tier_after` is allowed for in-tier events such as `prefix_hit` or `hash_insert`.
 - `reuse_count` is the cumulative count over the block's life and updated on every prefix_hit/promote.
 
+### 4.4b Weight-block records
+
+```json
+{
+  "ts_ns": ..., "type": "weight_block",
+  "subtype": "load|free|expert_dispatch|expert_release|lora_activate|lora_deactivate|tier_promote|tier_demote|update_apply|hash_insert",
+  "param_name": "model.layers.12.mlp.experts.7.w2.weight",
+  "shape": [4096, 11008],
+  "dtype": "bf16",
+  "bytes": 90177536,
+  "layer_idx": 12,
+  "expert_id": 7,
+  "shard_role": "tp_rank=2;pp_rank=0;ep_rank=1",
+  "lora_adapter_id": null,
+  "weight_version": "ckpt-sha-...",
+  "tier_before": "DRAM_LOCAL", "tier_after": "HBM_LOCAL",
+  "owner_request_id": null,
+  "reason": "startup_load|cpu_offload|expert_routing|lora_swap|rlhf_update|capacity_evict",
+  "v": 1
+}
+```
+
+Notes:
+- `owner_request_id` is non-null only when the event is triggered by a specific in-flight request (e.g., MoE expert dispatch for a token in request X, or a LoRA activation tied to that request's adapter). For startup load and RLHF updates it is `null`.
+- `expert_id` and `lora_adapter_id` are non-null only when applicable.
+- `weight_version` is the checkpoint or update SHA; it changes on every successful `update_apply` and is the join key for "which traffic belongs to which weight generation."
+- `shard_role` MUST be set on any record whose underlying tensor is sharded across tp/pp/ep so analyses can reassemble per-rank contributions.
+- `tier_before == tier_after` is allowed for in-tier events such as `hash_insert` or `expert_dispatch` that mark intent without moving bytes themselves; the paired `transfer` record (§4.5) is what carries the on-wire bytes.
+
 ### 4.5 Transfer records
 
-A *transfer* is the unit of remote KV movement that the system schedules as one operation. One `start` and one `end` record MUST be emitted per `transfer_id`.
+A *transfer* is the unit of remote tensor movement that the system schedules as one operation, regardless of payload (KV, weight, or activation). One `start` and one `end` record MUST be emitted per `transfer_id`.
 
 ```json
 {
   "ts_ns": ..., "type": "transfer",
   "subtype": "start|end|cancel",
   "transfer_id": "uuid",
+  "payload_kind": "kv|weight|activation",
   "direction": "load|save",
   "src": {"tier": "DRAM_REMOTE", "node_id": "...", "device_id": null},
   "dst": {"tier": "HBM_LOCAL",   "node_id": "...", "device_id": 0},
-  "transport": "nccl_p2p|nccl_send_recv|nixl|gdrcopy|ib_verbs|tcp|local_memcpy|file",
+  "transport": "nccl_p2p|nccl_send_recv|nccl_allgather|nccl_broadcast|nixl|gdrcopy|ib_verbs|tcp|local_memcpy|file|object_store|mmap",
   "request_id": "...", "layer_idx": 12,
+  "param_name": null, "expert_id": null, "lora_adapter_id": null, "weight_version": null,
   "num_blocks": 64, "bytes": 33554432,
   "block_ids": [78213, 78214, ...],
   "queued_ts_ns": ..., "started_ts_ns": ..., "completed_ts_ns": ...,
@@ -275,6 +315,8 @@ A *transfer* is the unit of remote KV movement that the system schedules as one 
 ```
 
 `earliest_known_ts_ns` is the timestamp at which the system first had enough information to know this transfer would be needed. It powers Q5. For prefix-cache-driven loads it is the time of the prefix match; for decode-driven pulls it is the scheduler decision time; for evictions it is the time the block became cold.
+
+When `payload_kind == "weight"`, `earliest_known_ts_ns` is the time the system committed to needing that weight: model-config parse for startup loads, the routing decision for MoE expert dispatch, request admission for LoRA activations, and receipt of the update RPC for RLHF updates. `block_ids` is `null` for weight payloads — `param_name`, `layer_idx`, `expert_id`, and `lora_adapter_id` identify the moved tensor instead. `num_blocks` for weights is the count of param tensors covered by the transfer (often 1).
 
 The `start` record carries `queued_ts_ns` and `started_ts_ns` (and `earliest_known_ts_ns`); the `end` record carries `completed_ts_ns`, the durations, achieved bandwidth, and per-WR completion times if the underlying API exposes them (NIXL does; NCCL does not).
 
@@ -405,6 +447,48 @@ For **LMCache** (`lmcache_connector.py`), the inner `LMCacheEngine` invokes its 
 
 In `vllm/v1/core/sched/scheduler.py::Scheduler.schedule`, after the scheduling round, emit a single `metadata` record of subtype `scheduler_decision` with the inputs the scheduler saw (queue depths, free blocks, KV pressure) and the outputs (admitted request ids, preempted ids, kv-load plans). One per step, regardless of how many requests it touched. This is the pivot record for question Q6.
 
+### 5.7 Weight & adapter probes (Q7)
+
+Five distinct event families. Each is a probe site; each emits the corresponding `weight_block` record (§4.4b) and, when bytes actually move on the wire, a paired `transfer` record with `payload_kind="weight"` (or `"activation"` for EP token dispatch).
+
+**(a) Startup model load.** One `weight_block.load` record per parameter tensor; one `transfer` record when bytes traverse a non-trivial transport (`object_store`, `tcp`, `mmap`, or NCCL all-gather/broadcast for tensor-parallel sharding).
+
+| File | Function | Notes |
+|---|---|---|
+| `vllm/model_executor/model_loader/loader.py` | `DefaultModelLoader.load_model`, `ShardedStateLoader.load_model`, `RunaiModelStreamerLoader.download_model`, `BitsAndBytesModelLoader.load_model`, `TensorizerLoader.load_model` | one record per `state_dict` entry; `transport` derived from the loader |
+| `vllm/v1/worker/gpu_worker.py` (or v1 equivalent) | `Worker.load_model` | wrap to capture per-worker wall-clock window; fill `shard_role` from `parallel_config` |
+| `vllm/distributed/parallel_state.py` | `broadcast_tensor_dict`, `tensor_model_parallel_all_gather` when called during load | emit `transfer` records ONLY when invoked from a load context — use a thread-local `payload_kind` flag set by the loader wrapper to disambiguate from activation collectives (see §15.8) |
+
+**(b) Layerwise CPU↔GPU offload.** One `weight_block.tier_promote` / `tier_demote` per offload event, plus a `transfer` record (`transport="local_memcpy"` or `"gdrcopy"`).
+
+| File | Function | Notes |
+|---|---|---|
+| `vllm/model_executor/model_loader/loader.py` | CPU-offload helpers (`_initialize_model` / equivalents) | emit on every prefetch and spill |
+| `vllm/v1/worker/gpu_model_runner.py` | per-layer prefetch hook if used | record `layer_idx` and the forward step that triggered the prefetch |
+
+**(c) MoE expert dispatch (expert parallelism).** One `weight_block.expert_dispatch` record per (step, expert) pair that received tokens. The actual wire traffic under EP is the *activation* all-to-all — emit a `transfer` record with `payload_kind="activation"` for each dispatch and combine.
+
+| File | Function | Notes |
+|---|---|---|
+| `vllm/model_executor/layers/fused_moe/layer.py` | `FusedMoE.forward` (and EP variants) | emit per-step, aggregating per-expert token counts; do NOT emit per-token, to control overhead |
+| `vllm/distributed/parallel_state.py` (EP collective sites) | EP all-to-all dispatch / combine | wrap to record `transfer` with `transport="nccl_send_recv"` and `payload_kind="activation"` |
+
+**(d) LoRA hot-swap.** One `weight_block.lora_activate` / `lora_deactivate` per swap; paired `transfer` when adapter weights cross a tier (CPU→HBM is typical).
+
+| File | Function | Notes |
+|---|---|---|
+| `vllm/lora/worker_manager.py` | `WorkerLoRAManager.set_active_loras`, `add_dummy_lora`, `remove_lora_from_cache` | record `lora_adapter_id`, the affected request ids, source tier |
+| `vllm/lora/models.py` | `LoRAModelManager.activate_adapter`, `add_adapter`, `remove_adapter` | covers admin-driven (non-request) swaps |
+
+**(e) Online weight updates (RLHF).** One `weight_block.update_apply` per parameter, plus one `transfer` per receive (typically NCCL recv from the trainer process).
+
+| File | Function | Notes |
+|---|---|---|
+| `vllm/v1/worker/worker_base.py` (or `vllm/worker/worker.py`) | `Worker.collective_rpc` handlers for `init_weight_update_group`, `update_weights_from_distributed`, `update_weights_from_tensor` | bump `weight_version` per update batch and stamp it on every record produced by the batch |
+| `vllm/distributed/parallel_state.py` | the NCCL recv site used by the update group | emit `transfer.start/end` with `transport="nccl_send_recv"`, `payload_kind="weight"` |
+
+Wrapper registration mirrors §5.4: a single `bkvt/integrations/vllm/weight_probe.py` registers monkey-patches at engine init when `BKVT_ENABLE=1`. Under `BKVT_PROFILE=coarse`, families (b), (c), and (d) emit only summary records (one per scheduler step), and family (a) emits only the per-load wall-clock window, not the per-tensor breakdown.
+
 ---
 
 ## 6. Instrumentation hook map — SGLang
@@ -461,6 +545,49 @@ The same wrapper-pattern from §5.4 applies. SGLang exposes its storage backends
 ### 6.6 Scheduler-decision probe (Q6)
 
 In `Scheduler.run_batch` (and the PD variants), emit a per-step `metadata` record `scheduler_decision` with the same payload as §5.6.
+
+### 6.7 Weight & adapter probes (Q7)
+
+Same five families as §5.7, mapped onto SGLang's tree.
+
+**(a) Startup model load.**
+
+| File | Function | Notes |
+|---|---|---|
+| `python/sglang/srt/model_loader/loader.py` | `DefaultModelLoader.load_model`, `ShardedStateLoader.load_model`, plus any backend-specific loaders | one record per `state_dict` entry |
+| `python/sglang/srt/model_executor/model_runner.py` | `ModelRunner.load_model` | per-worker wall-clock window |
+| `python/sglang/srt/managers/tp_worker.py` | `TpModelWorker.__init__` | TP-rank context; fills `shard_role` |
+
+**(b) Layerwise CPU↔GPU offload.** Where present:
+
+| File | Function | Notes |
+|---|---|---|
+| `python/sglang/srt/model_executor/model_runner.py` | offload helpers | record `layer_idx`; paired `transfer` with `transport="local_memcpy"` |
+
+**(c) MoE expert dispatch (EP).**
+
+| File | Function | Notes |
+|---|---|---|
+| `python/sglang/srt/layers/moe/ep_moe/` (token dispatch / combine) | EP dispatch / combine forward methods | per-step, per-expert aggregation |
+| `python/sglang/srt/layers/moe/fused_moe/` | fused MoE forward | covers non-EP MoE for completeness |
+| SGLang's parallel-state / distributed module | the all-to-all collective | `transfer` with `payload_kind="activation"`, `transport="nccl_send_recv"` |
+
+**(d) LoRA hot-swap.**
+
+| File | Function | Notes |
+|---|---|---|
+| `python/sglang/srt/lora/lora_manager.py` | `LoRAManager.set_lora_module`, `load_lora_adapter`, `unload_lora_adapter` (current names) | record `lora_adapter_id`, request set |
+| `python/sglang/srt/lora/lora.py` | per-adapter activation site | source/dest tiers |
+
+**(e) Online weight updates (RLHF).**
+
+| File | Function | Notes |
+|---|---|---|
+| `python/sglang/srt/model_executor/model_runner.py` | `ModelRunner.update_weights_from_distributed`, `update_weights_from_tensor`, `update_weights_from_disk` | per-param record; `weight_version` bumped per update batch |
+| `python/sglang/srt/managers/tp_worker.py` | the worker-side dispatch of the above | covers TP-rank fan-out |
+| `python/sglang/srt/managers/scheduler.py` | request handlers for `UpdateWeightsFromDistributedReqInput`, `UpdateWeightsFromTensorReqInput`, `UpdateWeightsFromDiskReqInput` | emits the request-level pivot record so traces can attribute downstream stalls |
+
+Wrapper registration: `bkvt/integrations/sglang/weight_probe.py`.
 
 ---
 
@@ -580,8 +707,9 @@ Overhead validation is part of CI (§14, M3): a smoke benchmark on ShareGPT v3 w
 | **Q4. Reuse / locality** | `kv_block.{allocate,free,prefix_hit,tier_*}` with `age_ns`, `reuse_count` | `transfer` records to attribute reuse to load events |
 | **Q5. Prefetchability** | `transfer.*` with `earliest_known_ts_ns` and `started_ts_ns` | `metadata.prefix_lookup` to pin earliest-known time |
 | **Q6. Scheduling impact** | `metadata.scheduler_decision` (§5.6, §6.6), `request.{admit,preempt,resume}` | aggregated `transfer` and `kv_block` over scheduler-decision windows |
+| **Q7. Remote weight & adapter traffic** | `weight_block.*` (§4.4b), `transfer.*` with `payload_kind="weight"` (§4.5) | `metadata.scheduler_decision` for MoE routing under EP; `sys_counter` NIC/NVLink bytes during weight updates; `request.*` to attribute LoRA-swap stalls to specific requests |
 
-A reference notebook `analysis/notebooks/Q1_to_Q6.ipynb` MUST exist that loads a sample trace and produces one canonical figure per question. The notebook is the acceptance test for "the framework can answer the question."
+A reference notebook `analysis/notebooks/Q1_to_Q7.ipynb` MUST exist that loads a sample trace and produces one canonical figure per question. The notebook is the acceptance test for "the framework can answer the question."
 
 Suggested figures (one per question):
 
@@ -591,6 +719,7 @@ Suggested figures (one per question):
 - Q4: reuse-distance CDF and per-tier residency CDF.
 - Q5: histogram of `(started_ts_ns − earliest_known_ts_ns)` aka prefetch slack.
 - Q6: scatter of scheduler-decision queue depth vs. resulting tail latency, colored by placement.
+- Q7: stacked-area of weight-bearing bytes over time, faceted by family (startup / offload / EP / LoRA / RLHF); plus CDF of LoRA-activation latency and its measured TPOT impact on co-resident requests.
 
 ---
 
@@ -641,14 +770,16 @@ BeyondKVTransfer/
 │   │   │   ├── connector_wrapper.py
 │   │   │   ├── scheduler_probe.py # §5.1, §5.6
 │   │   │   ├── block_pool_probe.py# §5.3, §5.5
-│   │   │   └── runner_probe.py    # §5.2
+│   │   │   ├── runner_probe.py    # §5.2
+│   │   │   └── weight_probe.py    # §5.7
 │   │   └── sglang/
 │   │       ├── __init__.py
 │   │       ├── patch.py
 │   │       ├── scheduler_probe.py
 │   │       ├── radix_probe.py
 │   │       ├── hicache_probe.py
-│   │       └── disagg_probe.py
+│   │       ├── disagg_probe.py
+│   │       └── weight_probe.py    # §6.7
 │   ├── collectors/
 │   │   ├── sys_counters.py        # DCGM / sysfs / proc
 │   │   ├── nccl_log.py            # NCCL log parser
@@ -661,6 +792,7 @@ BeyondKVTransfer/
 │   ├── request.schema.json
 │   ├── token.schema.json
 │   ├── kv_block.schema.json
+│   ├── weight_block.schema.json
 │   ├── transfer.schema.json
 │   ├── metadata.schema.json
 │   └── sys_counter.schema.json
@@ -672,7 +804,7 @@ BeyondKVTransfer/
 ├── analysis/
 │   ├── build_index.py             # jsonl → parquet
 │   ├── notebooks/
-│   │   └── Q1_to_Q6.ipynb
+│   │   └── Q1_to_Q7.ipynb
 │   └── lib/
 │       ├── load.py
 │       ├── critical_path.py
@@ -732,6 +864,10 @@ Acceptance: the notebook produces all six figures from a recorded trace.
 Implement `tests/overhead/test_overhead_budget.py`. Write `docs/how_to_*.md`.
 Acceptance: overhead test passes on the lab rig; how-to docs let a fresh engineer reproduce a trace from scratch.
 
+**M9. Weight & adapter probes (Q7).** *(prereq: M2 for vLLM-side, M4 for SGLang-side; can run in parallel with M3 / M5)*
+Implement `bkvt/integrations/vllm/weight_probe.py` and `bkvt/integrations/sglang/weight_probe.py` covering the five families in §5.7 / §6.7. Add `schemas/weight_block.schema.json` and extend `schemas/transfer.schema.json` with `payload_kind`. Extend the analysis notebook to `Q1_to_Q7.ipynb` and add `analysis/lib/weights.py` for the Q7 reductions (per-family byte rollup, LoRA-swap latency CDF, weight-update windowing).
+Acceptance: a startup load, an EP MoE step, a LoRA hot-swap, and an RLHF `update_weights_from_distributed` round-trip each produce well-formed `weight_block` and `transfer` records; bytes accounting agrees with NIC/NVLink counters to within 5 %; the disambiguation smoke test from §15.8 passes; overhead remains within the §9 budget when Q7 probes are enabled at default sampling.
+
 ---
 
 ## 15. Open questions and risks
@@ -743,6 +879,8 @@ Acceptance: overhead test passes on the lab rig; how-to docs let a fresh enginee
 5. **Tiering semantics differ across engines.** `tier_promote` in vLLM's connector world means "the connector loaded this block from remote into HBM"; in SGLang's HiCache world it can mean L3→L2 or L2→L1. The `tier_before/tier_after` fields disambiguate, so analyses MUST always read both — never rely on `subtype` alone.
 6. **Privacy of payloads.** Records carry `block_hash` (a content hash) but never raw token ids or KV tensor contents. Reaffirmed here so future probe additions cannot regress.
 7. **Storage size at scale.** A 24-hour cluster trace can produce TBs of jsonl. Coarse profile (`BKVT_PROFILE=coarse`) is the default for long-running captures; full mode is for targeted experiments.
+8. **Weight vs activation collective disambiguation.** `vllm/distributed/parallel_state.py` and SGLang's distributed module are called for *both* weight movement (load-time, RLHF updates) and activation movement (every forward pass). The §5.7 / §6.7 probe wrappers rely on a thread-local `payload_kind` set by the calling context (loader, update RPC, MoE forward) to tag the resulting `transfer` record correctly. Mistagging is a silent data-quality bug. CI MUST include a smoke test (`tests/integration/test_payload_kind_tagging.py`) that asserts (a) every collective in a load-only run carries `payload_kind="weight"`, (b) every collective in a steady-state decode run carries `payload_kind ∈ {"activation", "kv"}`, and (c) the totals reconcile against `/sys/class/infiniband/*/counters/` to within 5 %.
+9. **MoE expert-weight movement vs token movement.** Under expert parallelism the *weights* sit fixed on each EP rank and the *tokens* travel; under tensor or pipeline parallelism the weights themselves are sharded and may all-gather. Q7 analyses MUST distinguish the two, since they have opposite latency profiles. The `payload_kind` field plus `subtype` (`expert_dispatch` for token movement under fixed experts, `tier_promote`/`update_apply` for actual weight movement) are how analyses disambiguate.
 
 ---
 
